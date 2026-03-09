@@ -1055,7 +1055,7 @@ async def tree_parser(page_list, opt, doc=None, logger=None):
     return toc_tree
 
 
-def page_index_main(doc, opt=None):
+async def page_index_main(doc, opt=None):
     logger = JsonLogger(doc)
     
     is_valid_pdf = (
@@ -1097,7 +1097,7 @@ def page_index_main(doc, opt=None):
             'structure': structure,
         }
 
-    return asyncio.run(page_index_builder())
+    return await page_index_builder()
 
 
 def page_index(doc, model=None, toc_check_page_num=None, max_page_num_each_node=None, max_token_num_each_node=None,
@@ -1108,7 +1108,7 @@ def page_index(doc, model=None, toc_check_page_num=None, max_page_num_each_node=
         if arg != "doc" and value is not None
     }
     opt = ConfigLoader().load(user_opt)
-    return page_index_main(doc, opt)
+    return asyncio.run(page_index_main(doc, opt))
 
 
 def validate_and_truncate_physical_indices(toc_with_page_number, page_list_length, start_index=1, logger=None):

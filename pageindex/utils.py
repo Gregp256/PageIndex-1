@@ -17,18 +17,44 @@ import yaml
 from pathlib import Path
 from types import SimpleNamespace as config
 
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 CHATGPT_API_KEY = os.getenv("CHATGPT_API_KEY")
 
 def count_tokens(text, model=None):
     if not text:
         return 0
-    enc = tiktoken.encoding_for_model(model)
-    tokens = enc.encode(text)
-    return len(tokens)
+    # Tiktoken requires a valid model name. If using OpenRouter or Gemini, we might need a fallback.
+    try:
+        if not model or model.startswith("openai/") or "/" in model:
+            # Fallback for OpenRouter models or if no model specified
+            enc = tiktoken.get_encoding("cl100k_base")
+        else:
+            enc = tiktoken.encoding_for_model(model)
+        tokens = enc.encode(text)
+        return len(tokens)
+    except:
+        # Final fallback
+        return len(text) // 4
 
-def ChatGPT_API_with_finish_reason(model, prompt, api_key=CHATGPT_API_KEY, chat_history=None):
+def get_client_params(api_key=None):
+    # Determine the best key to use
+    key = api_key or CHATGPT_API_KEY or OPENAI_API_KEY or OPENROUTER_API_KEY
+    base_url = None
+    
+    # Prioritize OpenRouter if the key matches the format or if OPENROUTER_API_KEY is the only one set
+    is_openrouter = (key and key.startswith("sk-or-v1-")) or (OPENROUTER_API_KEY and not (OPENAI_API_KEY or CHATGPT_API_KEY))
+    
+    if is_openrouter:
+        base_url = "https://openrouter.ai/api/v1"
+        key = api_key or OPENROUTER_API_KEY # Ensure we use the OpenRouter key
+        
+    return {"api_key": key, "base_url": base_url}
+
+def ChatGPT_API_with_finish_reason(model, prompt, api_key=None, chat_history=None):
     max_retries = 10
-    client = openai.OpenAI(api_key=api_key)
+    params = get_client_params(api_key)
+    client = openai.OpenAI(**params)
     for i in range(max_retries):
         try:
             if chat_history:
@@ -41,6 +67,10 @@ def ChatGPT_API_with_finish_reason(model, prompt, api_key=CHATGPT_API_KEY, chat_
                 model=model,
                 messages=messages,
                 temperature=0,
+                extra_headers={
+                    "HTTP-Referer": "http://localhost:8086", # Optional, for OpenRouter
+                    "X-Title": "RunAI PageIndex"
+                } if params["base_url"] else None
             )
             if response.choices[0].finish_reason == "length":
                 return response.choices[0].message.content, "max_output_reached"
@@ -56,11 +86,10 @@ def ChatGPT_API_with_finish_reason(model, prompt, api_key=CHATGPT_API_KEY, chat_
                 logging.error('Max retries reached for prompt: ' + prompt)
                 return "Error"
 
-
-
-def ChatGPT_API(model, prompt, api_key=CHATGPT_API_KEY, chat_history=None):
+def ChatGPT_API(model, prompt, api_key=None, chat_history=None):
     max_retries = 10
-    client = openai.OpenAI(api_key=api_key)
+    params = get_client_params(api_key)
+    client = openai.OpenAI(**params)
     for i in range(max_retries):
         try:
             if chat_history:
@@ -73,6 +102,10 @@ def ChatGPT_API(model, prompt, api_key=CHATGPT_API_KEY, chat_history=None):
                 model=model,
                 messages=messages,
                 temperature=0,
+                extra_headers={
+                    "HTTP-Referer": "http://localhost:8086",
+                    "X-Title": "RunAI PageIndex"
+                } if params["base_url"] else None
             )
    
             return response.choices[0].message.content
@@ -84,18 +117,22 @@ def ChatGPT_API(model, prompt, api_key=CHATGPT_API_KEY, chat_history=None):
             else:
                 logging.error('Max retries reached for prompt: ' + prompt)
                 return "Error"
-            
 
-async def ChatGPT_API_async(model, prompt, api_key=CHATGPT_API_KEY):
+async def ChatGPT_API_async(model, prompt, api_key=None):
     max_retries = 10
+    params = get_client_params(api_key)
     messages = [{"role": "user", "content": prompt}]
     for i in range(max_retries):
         try:
-            async with openai.AsyncOpenAI(api_key=api_key) as client:
+            async with openai.AsyncOpenAI(**params) as client:
                 response = await client.chat.completions.create(
                     model=model,
                     messages=messages,
                     temperature=0,
+                    extra_headers={
+                        "HTTP-Referer": "http://localhost:8086",
+                        "X-Title": "RunAI PageIndex"
+                    } if params["base_url"] else None
                 )
                 return response.choices[0].message.content
         except Exception as e:
@@ -105,7 +142,7 @@ async def ChatGPT_API_async(model, prompt, api_key=CHATGPT_API_KEY):
                 await asyncio.sleep(1)  # Wait for 1s before retrying
             else:
                 logging.error('Max retries reached for prompt: ' + prompt)
-                return "Error"  
+                return "Error"
             
             
 def get_json_content(response):
